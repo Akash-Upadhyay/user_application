@@ -1,0 +1,183 @@
+---
+- name: Deploy Microservices Application
+  hosts: localhost
+  become: true
+  tasks:
+    - name: Create network if it doesn't exist
+      command: docker network create microservices-network
+      ignore_errors: yes
+
+    # Pull the latest Docker images
+    - name: Pull MySQL image
+      command: docker pull mysql:8.0
+
+    - name: Pull Auth Service image
+      command: docker pull mt2024013/auth-service
+
+    - name: Pull User Service image
+      command: docker pull mt2024013/user-service
+
+    - name: Pull API Gateway image
+      command: docker pull mt2024013/api-gateway
+
+    - name: Pull Analytics Service image
+      command: docker pull mt2024013/analytics-service
+
+    - name: Pull Frontend image
+      command: docker pull mt2024013/frontend
+
+    # Stop and remove existing containers (if running)
+    - name: Stop existing containers
+      shell: |
+        docker stop mysql auth-service user-service api-gateway analytics-service frontend || true
+      ignore_errors: yes
+
+    - name: Remove old containers
+      shell: |
+        docker rm mysql auth-service user-service api-gateway analytics-service frontend || true
+      ignore_errors: yes
+
+    # Create volume for MySQL
+    - name: Create MySQL volume if it doesn't exist
+      command: docker volume create mysql_data
+      ignore_errors: yes
+
+    # Run new containers
+    - name: Run MySQL container
+      shell: |
+        docker run -d --name mysql \
+          --network microservices-network \
+          -e MYSQL_ROOT_PASSWORD=rootpassword \
+          -e MYSQL_DATABASE=microservices \
+          -e MYSQL_USER=user \
+          -e MYSQL_PASSWORD=password \
+          -p 3306:3306 \
+          -v mysql_data:/var/lib/mysql \
+          --health-cmd="mysqladmin ping -h localhost -u root -prootpassword" \
+          --health-interval=10s \
+          --health-timeout=5s \
+          --health-retries=5 \
+          mysql:8.0
+
+    # Wait for MySQL to be ready
+    - name: Wait for MySQL to be ready
+      shell: |
+        for i in {1..30}; do
+          if docker exec mysql mysqladmin ping -h localhost -u root -prootpassword --silent; then
+            break
+          fi
+          echo "Waiting for MySQL to be ready... attempt $i/30"
+          sleep 5
+        done
+      ignore_errors: no
+
+    - name: Run Auth Service container
+      shell: |
+        docker run -d --name auth-service \
+          --network microservices-network \
+          -e DATABASE_URL=mysql+pymysql://user:password@mysql:3306/microservices \
+          -e JWT_SECRET=your_jwt_secret \
+          -p 3001:3001 \
+          mt2024013/auth-service
+
+    - name: Run User Service container
+      shell: |
+        docker run -d --name user-service \
+          --network microservices-network \
+          -e DATABASE_URL=mysql+pymysql://user:password@mysql:3306/microservices \
+          -e JWT_SECRET=your_jwt_secret \
+          -e AUTH_SERVICE_URL=http://auth-service:3001 \
+          -p 3002:3002 \
+          mt2024013/user-service
+
+    - name: Run Analytics Service container
+      shell: |
+        docker run -d --name analytics-service \
+          --network microservices-network \
+          -p 3004:3004 \
+          mt2024013/analytics-service
+
+    - name: Run API Gateway container
+      shell: |
+        docker run -d --name api-gateway \
+          --network microservices-network \
+          -e AUTH_SERVICE_URL=http://auth-service:3001 \
+          -e USER_SERVICE_URL=http://user-service:3002 \
+          -e ANALYTICS_SERVICE_URL=http://analytics-service:3004 \
+          -p 8000:8000 \
+          mt2024013/api-gateway
+
+    - name: Run Frontend container
+      shell: |
+        docker run -d --name frontend \
+          --network microservices-network \
+          -e REACT_APP_API_URL=/api \
+          -p 80:80 \
+          mt2024013/frontend
+
+    # Wait for services to start
+    - name: Wait for services to initialize
+      pause:
+        seconds: 30
+
+    # Verify service health
+    - name: Check service health
+      shell: |
+        echo "Checking service health..."
+        
+        # Check if Frontend is running
+        if curl -s http://localhost >/dev/null; then
+          echo "✅ Frontend is running"
+        else
+          echo "❌ Frontend is not responding"
+          echo "Logs: $(docker logs frontend --tail 10)"
+        fi
+        
+        # Check if API Gateway is running
+        if curl -s http://localhost:8000 >/dev/null; then
+          echo "✅ API Gateway is running"
+        else
+          echo "❌ API Gateway is not responding"
+          echo "Logs: $(docker logs api-gateway --tail 10)"
+        fi
+        
+        # Check if Auth Service is running
+        if curl -s http://localhost:3001 >/dev/null; then
+          echo "✅ Auth Service is running"
+        else
+          echo "❌ Auth Service is not responding"
+          echo "Logs: $(docker logs auth-service --tail 10)"
+        fi
+        
+        # Check if User Service is running
+        if curl -s http://localhost:3002 >/dev/null; then
+          echo "✅ User Service is running"
+        else
+          echo "❌ User Service is not responding"
+          echo "Logs: $(docker logs user-service --tail 10)"
+        fi
+        
+        # Check if Analytics Service is running
+        if curl -s http://localhost:3004 >/dev/null; then
+          echo "✅ Analytics Service is running"
+        else
+          echo "❌ Analytics Service is not responding"
+          echo "Logs: $(docker logs analytics-service --tail 10)"
+        fi
+      register: service_health
+      ignore_errors: yes
+
+    - name: Display service health results
+      debug:
+        var: service_health.stdout_lines
+
+    - name: Show deployment completion message
+      debug:
+        msg: 
+          - "Setup complete! The application is accessible at http://localhost"
+          - "You can use the following services:"
+          - "- Frontend UI: http://localhost"
+          - "- API Gateway: http://localhost:8000"
+          - "- Auth Service: http://localhost:3001"
+          - "- User Service: http://localhost:3002"
+          - "- Analytics Service: http://localhost:3004" 
