@@ -157,31 +157,17 @@ pipeline {
             steps {
                 script {
                     if (env.DEPLOYMENT_STRATEGY == 'ansible') {
-                        echo "Deploying with Ansible..."
-                        // Deploy using Ansible
+                        echo "Deploying with Ansible to Docker..."
+                        // Deploy using Ansible for Docker Compose
                         sh '''
                         ansible-playbook -i inventory.ini ansible-playbook.yml
                         '''
                     } else if (env.DEPLOYMENT_STRATEGY == 'kubernetes') {
-                        echo "Deploying with Kubernetes..."
-                        // Check if minikube is running, if not start it
+                        echo "Deploying to Kubernetes using kubectl..."
+                        // Make the deployment script executable and run it
                         sh '''
-                        if ! minikube status &>/dev/null; then
-                            minikube start
-                        fi
-                        '''
-                        
-                        // Deploy using Kubernetes
-                        sh '''
-                        chmod +x deploy-k8s.sh
-                        ./deploy-k8s.sh
-                        '''
-                        
-                        // Display application URL
-                        sh '''
-                        MINIKUBE_IP=$(minikube ip)
-                        echo "Application is accessible at: http://$MINIKUBE_IP"
-                        echo "Make sure to add $MINIKUBE_IP to your /etc/hosts file as 'microservices.local'"
+                        chmod +x jenkins-k8s-deploy.sh
+                        ./jenkins-k8s-deploy.sh
                         '''
                     } else {
                         error "Invalid deployment strategy specified: ${env.DEPLOYMENT_STRATEGY}"
