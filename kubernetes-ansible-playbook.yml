@@ -1,0 +1,102 @@
+---
+- name: Deploy Microservices Application to Kubernetes
+  hosts: kubernetes_master
+  become: false
+  vars:
+    application_name: "microservices-app"
+    k8s_manifest_dir: "{{ playbook_dir }}/k8s"
+    minikube_host: "{{ minikube_ip | default('127.0.0.1') }}"
+    host_entry: "{{ minikube_host }} microservices.local"
+
+  tasks:
+    - name: Check if Minikube is running
+      shell: minikube status
+      register: minikube_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Start Minikube if not running
+      shell: minikube start
+      when: minikube_status.rc != 0
+      register: minikube_start_result
+
+    - name: Enable Ingress addon for Minikube
+      shell: minikube addons enable ingress
+      register: ingress_enabled
+      changed_when: "'The 'ingress' addon is enabled' in ingress_enabled.stdout"
+
+    - name: Wait for Ingress controller to be ready
+      shell: |
+        kubectl wait --namespace ingress-nginx \
+          --for=condition=ready pod \
+          --selector=app.kubernetes.io/component=controller \
+          --timeout=120s
+      ignore_errors: yes
+      register: ingress_ready
+      
+    - name: Get Minikube IP
+      shell: minikube ip
+      register: minikube_ip_cmd
+      changed_when: false
+
+    - name: Set Minikube IP fact
+      set_fact:
+        minikube_host: "{{ minikube_ip_cmd.stdout }}"
+
+    - name: Check if k8s directory exists
+      stat:
+        path: "{{ k8s_manifest_dir }}"
+      register: k8s_dir
+
+    - name: Ensure k8s directory exists
+      file:
+        path: "{{ k8s_manifest_dir }}"
+        state: directory
+      when: not k8s_dir.stat.exists
+
+    - name: Apply Kubernetes resources with kubectl
+      shell: kubectl apply -k {{ k8s_manifest_dir }}/
+      register: k8s_apply
+      changed_when: k8s_apply.rc == 0
+
+    - name: Wait for all deployments to be ready (5 minute timeout)
+      shell: |
+        kubectl wait --for=condition=available deployment/mysql deployment/auth-service deployment/user-service deployment/analytics-service deployment/api-gateway deployment/frontend --timeout=300s
+      register: deployments_ready
+      ignore_errors: yes
+      
+    - name: Get all pods
+      shell: kubectl get pods
+      register: pod_status
+      changed_when: false
+
+    - name: Start Minikube tunnel in background
+      shell: |
+        # Check if tunnel is already running
+        ps aux | grep "[m]inikube tunnel" || minikube tunnel > /dev/null 2>&1 &
+      async: 300
+      poll: 0
+      register: tunnel_result
+      
+    - name: Check if microservices.local exists in /etc/hosts
+      shell: grep "microservices.local" /etc/hosts || echo "not found"
+      register: hosts_check
+      changed_when: false
+      become: true
+      
+    - name: Add entry to /etc/hosts if needed
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ minikube_host }} microservices.local"
+        state: present
+      when: "'not found' in hosts_check.stdout"
+      become: true
+
+    - name: Show deployment status
+      debug:
+        msg:
+          - "Application deployed to Kubernetes!"
+          - "Frontend URL: http://microservices.local"
+          - "API Gateway URL: http://microservices.local/api"
+          - "Pod Status:"
+          - "{{ pod_status.stdout_lines }}" 

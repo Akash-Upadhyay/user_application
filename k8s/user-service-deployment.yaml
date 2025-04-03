@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  labels:
+    app: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+      - name: user-service
+        image: mt2024013/user-service
+        ports:
+        - containerPort: 3002
+        env:
+        - name: DATABASE_URL
+          value: "mysql+pymysql://user:password@mysql:3306/microservices"
+        - name: JWT_SECRET
+          value: "your_jwt_secret"
+        - name: AUTH_SERVICE_URL
+          value: "http://auth-service:3001"
+        resources:
+          limits:
+            memory: 256Mi
+            cpu: "0.2"
+          requests:
+            memory: 128Mi
+            cpu: "0.1"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3002
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3002
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          failureThreshold: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+spec:
+  selector:
+    app: user-service
+  ports:
+  - port: 3002
+    targetPort: 3002
+  type: ClusterIP 
