@@ -8,6 +8,7 @@ pipeline {
         API_GATEWAY_IMAGE = "${DOCKER_REGISTRY}/api-gateway"
         ANALYTICS_SERVICE_IMAGE = "${DOCKER_REGISTRY}/analytics-service"
         FRONTEND_IMAGE = "${DOCKER_REGISTRY}/frontend"
+        KUBECONFIG = "/var/lib/jenkins/.kube/config"
     }
 
     stages {
@@ -155,21 +156,26 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 sh '''
+                # Verify kubectl can access the cluster
+                echo "Checking cluster access..."
+                kubectl --kubeconfig=$KUBECONFIG cluster-info
+                
                 # Apply Kubernetes manifests
-                kubectl apply -k k8s/
+                echo "Deploying Kubernetes resources..."
+                kubectl --kubeconfig=$KUBECONFIG apply -k k8s/
                 
                 # Show deployed resources
                 echo "Deployments:"
-                kubectl get deployments
+                kubectl --kubeconfig=$KUBECONFIG get deployments
                 
                 echo "Services:"
-                kubectl get services
+                kubectl --kubeconfig=$KUBECONFIG get services
                 
                 echo "Pods:"
-                kubectl get pods
+                kubectl --kubeconfig=$KUBECONFIG get pods
                 
                 echo "Ingress:"
-                kubectl get ingress
+                kubectl --kubeconfig=$KUBECONFIG get ingress
                 '''
             }
         }
