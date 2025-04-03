@@ -8,7 +8,6 @@ pipeline {
         API_GATEWAY_IMAGE = "${DOCKER_REGISTRY}/api-gateway"
         ANALYTICS_SERVICE_IMAGE = "${DOCKER_REGISTRY}/analytics-service"
         FRONTEND_IMAGE = "${DOCKER_REGISTRY}/frontend"
-        DEPLOYMENT_STRATEGY = "kubernetes" // Options: 'ansible' or 'kubernetes'
     }
 
     stages {
@@ -153,26 +152,25 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    if (env.DEPLOYMENT_STRATEGY == 'ansible') {
-                        echo "Deploying with Ansible to Docker..."
-                        // Deploy using Ansible for Docker Compose
-                        sh '''
-                        ansible-playbook -i inventory.ini ansible-playbook.yml
-                        '''
-                    } else if (env.DEPLOYMENT_STRATEGY == 'kubernetes') {
-                        echo "Deploying to Kubernetes using kubectl..."
-                        // Make the deployment script executable and run it
-                        sh '''
-                        chmod +x jenkins-k8s-deploy.sh
-                        ./jenkins-k8s-deploy.sh
-                        '''
-                    } else {
-                        error "Invalid deployment strategy specified: ${env.DEPLOYMENT_STRATEGY}"
-                    }
-                }
+                sh '''
+                # Apply Kubernetes manifests
+                kubectl apply -k k8s/
+                
+                # Show deployed resources
+                echo "Deployments:"
+                kubectl get deployments
+                
+                echo "Services:"
+                kubectl get services
+                
+                echo "Pods:"
+                kubectl get pods
+                
+                echo "Ingress:"
+                kubectl get ingress
+                '''
             }
         }
     }
@@ -185,10 +183,7 @@ pipeline {
             echo "Pipeline failed!"
         }
         always {
-            // Clean up Docker images to save space
-            sh '''
-            docker system prune -f
-            '''
+            sh 'docker system prune -f'
         }
     }
 } 
